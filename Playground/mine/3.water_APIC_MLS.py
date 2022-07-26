@@ -4,7 +4,7 @@ arch = ti.vulkan if ti._lib.core.with_vulkan() else ti.cuda
 ti.init(arch=ti.cuda)
 
 ########## simulation parameter ##############
-grid_res = 128
+grid_res = 64
 particle_num = 2 * (grid_res ** 3) // 4  # 512 * 16  ##python global variable : not updated in taichi kernel
 particle_rho = 1
 
@@ -14,12 +14,13 @@ grid_inv_dx = 1 / grid_dx
 
 particle_initial_volume = (grid_dx * 0.5) ** 3
 particle_mass = particle_rho * particle_initial_volume
-dt = 1e-4
+dt = 4e-4
 
 # material property
 bulk_modulus = 10  ## lame's second coefficient
 gamma = 7  ## compressibility
 E = 4
+viscosity =0.03#0#0.05
 
 gravity = 9.8
 bound = 3
@@ -30,7 +31,7 @@ ti_particle_pos = ti.Vector.field(3, ti.f32, particle_num)
 ti_particle_vel = ti.Vector.field(3, ti.f32, particle_num)
 ti_particle_C = ti.Matrix.field(3, 3, ti.f32, particle_num)
 ti_particle_Jp = ti.field(ti.f32, particle_num)
-#ti_kinetic_energy = ti.field(ti.f32, 100000)
+# ti_kinetic_energy = ti.field(ti.f32, 100000)
 
 # grid data
 ti_grid_vel = ti.Vector.field(3, ti.f32, shape=(grid_res, grid_res, grid_res))
@@ -61,7 +62,7 @@ def init():
             (ti.random() - 0.5) * 0.5 + 0.3,
             (ti.random() - 0.5) * 0.5 + 0.5,
         ]
-        ti_particle_Jp[p] = 0.9
+        ti_particle_Jp[p] = 1
         ti_particle_vel[p] = [0, 0, 0]
         ti_particle_C[p] = ti.Matrix.zero(ti.f32, 3, 3)
     # grid initialize
@@ -91,9 +92,12 @@ def substep():
         # stress = -ti.Matrix.identity(ti.f32, 3) * pressure
         # affine = stress                   + particle_mass * ti_particle_C[p]
         # stress = -dt * 4 * E * particle_initial_volume * (ti_particle_Jp[p] - 1) / grid_dx ** 2
-        stress = dt * 4 * (bulk_modulus * ((1 / ti_particle_Jp[p]) ** gamma - 1) * ti_particle_Jp[
+        stress = dt * 4 * ((bulk_modulus * ((1 / ti_particle_Jp[p]) ** gamma - 1)) * ti_particle_Jp[
             p] * particle_initial_volume) / grid_dx ** 2
-        affine = ti.Matrix([[stress, 0, 0], [0, stress, 0], [0, 0, stress]]) + particle_mass * ti_particle_C[p]
+        stress_viscous = -dt * 4 * (viscosity * (ti_particle_C[p] + ti_particle_C[p].transpose()) * ti_particle_Jp[
+            p] * particle_initial_volume) / grid_dx ** 2
+        affine = ti.Matrix([[stress, 0, 0], [0, stress, 0], [0, 0, stress]]) + stress_viscous + particle_mass * \
+                 ti_particle_C[p]
 
         # loop unrolling
         # scattering
@@ -172,6 +176,7 @@ def render_gui():
     window.GUI.begin("Render setting", 0.02, 0.02, 0.4, 0.15)
     particle_color = window.GUI.color_edit_3("particle color", particle_color)
     particle_radius = window.GUI.slider_float("particle radius", particle_radius, 0.001, 0.1)
+
     E = window.GUI.slider_float("E", E, 4, 1000)
     if window.GUI.button("restart"):
         init()
@@ -202,16 +207,15 @@ if __name__ == '__main__':
     camera.projection_mode(ti.ui.ProjectionMode.Perspective)
     print(particle_num)
     while window.running:
-        for s in range(int(desired_frame_dt//dt)):
+        for s in range(5):
             substep()
 
-        #calc_energy()
+        # calc_energy()
         ti_frame[None] += 1
 
         render()
         render_gui()
         window.show()
 
-
-    #print(ti_kinetic_energy)
+    # print(ti_kinetic_energy)
     print("hello")
